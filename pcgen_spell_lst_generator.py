@@ -7,6 +7,7 @@ import os
 
 
 PCGEN_TAB_SIZE = 6  # Used to half-assedly format the first few fields' spacing when writing to a .lst file
+VERSION = "1.0.1"
 
 class Spell:
     def __init__(self, name: str, classes_by_level: list, school: str, casting_time: str, spell_range: str,
@@ -176,12 +177,14 @@ class SpellGenerator:
         """
         self.config_file = "pcg_lst_generator.cfg"
         self.default_directory = "."
-        self.load_config()
-        self.spell_list = spells
-        self.mod_list = mods
+
         self.win = Tk(screenName=None, baseName=None, className='Tk')
         self.win.title("PCGen Homebrew Spell Generator")
         self.win.protocol("WM_DELETE_WINDOW", self.on_exit)
+
+        self.load_config()
+        self.spell_list = spells
+        self.mod_list = mods
 
         menubar = Menu(self.win)
         file_menu = Menu(menubar, tearoff=0)
@@ -861,7 +864,7 @@ class SpellGenerator:
             messagebox.showinfo("Success", "Loaded spells from file: " + filename)
 
     def about_dialog(self) -> None:
-        messagebox.showinfo("PCGen Homebrew Spell .lst Generator v1.0", "Build date: 10 July 2022\n" +
+        messagebox.showinfo("PCGen Homebrew Spell .lst Generator " + VERSION, "Build date: 10 July 2022\n" +
                             "Written by Sean Butler (Tamdrik#0553 on PCGen Discord)")
 
     def on_exit(self) -> None:
@@ -905,6 +908,7 @@ class SpellGenerator:
         Function to try to find the PCGen directory to set as a default starting folder when there is no config file
         present containing a default folder (normally the last-used folder).
         """
+        pcgen_folder_found = False
         path = os.path.expanduser('~')
         try:
             contents = os.listdir(path)
@@ -921,11 +925,16 @@ class SpellGenerator:
                             candidate = os.path.join(path, entry)
                             if os.path.isdir(candidate) and entry.startswith("6.") and entry.count("Save") == 0:
                                 path = os.path.join(candidate, "data")
+                                pcgen_folder_found = True
                                 break
         except Exception as e:
             print("Could not find PCGen directory.  Returning current working directory.")
             print(e)
             path = "."
+        if not pcgen_folder_found:
+            messagebox.showwarning("Could not find PCGen Directory", "Couldn't find PCGen directory in standard " +
+                                   "install location.  You will need to save .lst files in a homebrew folder " +
+                                   "somewhere under the 'data' folder where PCGen is installed on your system.")
         return path
 
     @staticmethod
