@@ -13,19 +13,54 @@ v1.1: Major update to add D&D 5e support and more explicit D&D 3.5 support.  Mai
       each game mode.
 v1.1.1: Fixes bug introduced by adding 5e support that broke loading most .MODs and made other minor changes to
         tooltips and message boxes to tailor to selected game system better and removed some debugging lines.
+v1.1.2: Adds support for material component descriptions in D&D 5e.  Further cleanup/tailoring of tooltips, etc.
+        Removes vestigial psionic support for 3.5e because it's a mess. 
 """
 
 PCGEN_TAB_SIZE = 6  # Used to half-assedly format the first few fields' spacing when writing to a .lst file
-VERSION = "1.1"
-BUILD_DATE = "10 July 2022"
+VERSION = "1.1.2"
+BUILD_DATE = "11 July 2022"
+
 
 class Spell:
     def __init__(self, name: str, classes_by_level: list, school: str, casting_time: str, spell_range: str,
                  duration: str, desc: str, arcane: bool = False, divine: bool = False, psychic: bool = False,
                  save: str = "", sr: str = "", target: str = "", descriptors: list = (), subschool: str = "",
                  verbal: bool = False, somatic: bool = False, material: bool = False, focus: bool = False,
-                 divine_focus: bool = False, other_fields: list = (), mode: str = "Pathfinder 1e"):
-        """ Type representing a 3.5/Pathfinder spell to be stored in a PCGen .lst file. """
+                 divine_focus: bool = False, material_desc: str = "", class_suffix: str = "", other_fields: list = (),
+                 mode: str = "Pathfinder 1e"):
+        """
+        Type representing a Pathfinder/3.5e/5e spell to be stored in a PCGen .lst file.
+
+        :param name: Name of spell
+        :param classes_by_level: 10-element list (spell levels 0-9) of lists of strings (casting classes/spell lists)
+        :param school: Spell school (e.g., Abjuration)
+        :param casting_time: Casting time (e.g., 1 standard action)
+        :param spell_range: Spell range (e.g., Touch)
+        :param duration: Spell duration (e.g., 1 round)
+        :param desc: Full description of spell effect
+        :param arcane: Boolean indicating this is an Arcane spell
+        :param divine: Boolean indicating this is a Divine spell
+        :param psychic: Boolean indicating this is a Psychic spell (PF1e)
+        :param save: Description of saving throw vs. this spell (e.g., Will negates)
+        :param sr: Whether this spell allows spell resistance.  String, not boolean. (e.g., Yes (Harmless)) (3.5/PF1e)
+        :param target: Spell target (e.g., creature touched) (3.5/PF1e)
+        :param descriptors: Spell descriptors (e.g., acid) (3.5/PF1e)
+        :param subschool: Spell subschool (e.g., healing). Used to store "Ritual" tag for 5e.
+        :param verbal: Boolean indicating this spell has a Verbal component
+        :param somatic: Boolean indicating this spell has a Somatic component
+        :param material: Boolean indicating this spell has a Material component
+        :param focus: Boolean indicating this spell has a Focus component (3.5/PF1e)
+        :param divine_focus: Boolean indicating this spell has a Divine Focus component (3.5/PF1e)
+        :param material_desc: Description of material component required (5e only)
+        :param class_suffix: Extra conditions/code attached to the CLASSES token that can't be parsed/processed.
+                            e.g., [PREVARGTEQ:PsionicShaper, 1] (seen primarily in 3.5e psionics, which aren't
+                            supported, so maybe not needed)
+        :param other_fields: Additional fields in loaded .lst that this tool doesn't explicitly support except to
+                            preserve them when written back to a .lst
+        :param mode: Valid values are "Pathfinder 1e", "D&D 3.5e", or "D&D 5e" (affects how spells get written to .lst)
+        """
+
         self.fields = {}
         self.type = {}
         self.comps = {}
@@ -40,6 +75,8 @@ class Spell:
         self.fields['duration'] = duration.strip()
         self.fields['sr'] = sr.strip()
         self.fields['desc'] = desc.strip()
+        self.fields['material_desc'] = material_desc.strip()
+        self.fields['class_suffix'] = class_suffix.strip()
         self.type['arcane'] = arcane
         self.type['divine'] = divine
         self.type['psychic'] = psychic
@@ -61,7 +98,7 @@ class Spell:
         :return: String representation of a spell: the corresponding line in a PCGen .lst file.
         """
         spell_string = self.fields['name']
-        for i in range(0, 6-int(len(self.fields['name'])/PCGEN_TAB_SIZE)):
+        for i in range(0, 6 - int(len(self.fields['name']) / PCGEN_TAB_SIZE)):
             spell_string += "\t"
 
         # Generate list of spell types (Arcane, Divine, Psychic)
@@ -81,7 +118,7 @@ class Spell:
                     type_string_length += 1
                 spell_string = spell_string + "Divine"
                 type_string_length += 6
-            if self.type['psychic'] and self.mode != "D&D 5e":
+            if self.type['psychic'] and self.mode == "Pathfinder 1e":
                 if first_type:
                     first_type = False
                 else:
@@ -92,7 +129,7 @@ class Spell:
             if self.mode == "D&D 5e":
                 spell_string = spell_string + ".Spell"
                 type_string_length += 6
-            spell_string = spell_string + "\t" * (4-int(type_string_length/PCGEN_TAB_SIZE))
+            spell_string = spell_string + "\t" * (4 - int(type_string_length / PCGEN_TAB_SIZE))
         spell_string = spell_string + "\tCLASSES:"
 
         # Construct list of classes that can cast spell at what levels
@@ -111,7 +148,8 @@ class Spell:
                         spell_string += ","
                     spell_string += class_name
                 spell_string += "=" + str(level)
-
+        if len(self.fields['class_suffix']) > 0:
+            spell_string += self.fields['class_suffix']
         spell_string = spell_string + "\tSCHOOL:" + self.fields['school']
         if len(self.fields['subschool']) > 0:
             spell_string = spell_string + "\tSUBSCHOOL:" + self.fields['subschool']
@@ -143,6 +181,8 @@ class Spell:
             else:
                 spell_string = spell_string + ","
             spell_string = spell_string + "M"
+            if len(self.fields['material_desc']) > 0 and self.mode == "D&D 5e":
+               spell_string = spell_string + " (" + self.fields['material_desc'] + ")"
         if self.mode != "D&D 5e":
             if self.comps['focus']:
                 if first_component:
@@ -189,7 +229,7 @@ class SpellGenerator:
 
         :param spells: Starting spell list, if any (defaults to empty list).  Stored in list as type Spell.
         :param mods: Starting list of spell mods, represented as strings (defaults to empty list).  This class does not
-                        handle .MODs in any way except to store them when loaded from a .lst file so they can be
+                        handle .MODs in any way except to store them when loaded from a .lst file so that they can be
                         preserved and written back when the spells are saved to a .lst file.
         """
         modes = ("Pathfinder 1e", "D&D 3.5e", "D&D 5e")
@@ -240,10 +280,8 @@ class SpellGenerator:
 
         self.spell_lb = Listbox(self.spell_list_frame, height=30, width=30, selectmode=SINGLE, font=('Arial', 10))
 
-        index = 0
         for spell in self.spell_list[self.system_mode.get()]:
-            self.spell_lb.insert(index, spell.fields['name'])
-            index = index + 1
+            self.spell_lb.insert(END, spell.fields['name'])
         self.spell_lb.config(yscrollcommand=self.scrollbar.set)
         self.scrollbar.config(command=self.spell_lb.yview)
         self.spell_lb.pack(fill=BOTH, expand=True)
@@ -254,10 +292,10 @@ class SpellGenerator:
 
         self.edit_spell_button = Button(self.spell_list_button_frame, text="Edit Spell", width=15,
                                         command=self.edit_spell)
-        self.edit_spell_button.pack(side=LEFT, pady=(0,10))
+        self.edit_spell_button.pack(side=LEFT, pady=(0, 10))
         self.remove_spell_button = Button(self.spell_list_button_frame, text="Remove Spell", width=15,
                                           command=self.remove_spell)
-        self.remove_spell_button.pack(side=LEFT, pady=(0,10))
+        self.remove_spell_button.pack(side=LEFT, pady=(0, 10))
 
         # Build spell editing frame
         self.spell_editor = SpellEditor(master=self.win, generator=self)
@@ -293,7 +331,7 @@ class SpellGenerator:
                     self.spell_lb.delete(i)
                     break
                 else:
-                   return
+                    return
 
         self.spell_list[self.system_mode.get()].append(spell)
         self.spell_lb.insert(END, spell.fields['name'])
@@ -332,7 +370,8 @@ class SpellGenerator:
         Calls generate_spell_lst() and generate_pcc_file() to actually write to the respective files.
         """
         if len(self.spell_list[self.system_mode.get()]) == 0:
-            messagebox.showerror("No spells defined", "No spells to save to a .lst file.  Load and/or add spells first.")
+            messagebox.showerror("No spells defined", "No spells to save to a .lst file.  " +
+                                 "Load and/or add spells first.")
             return
         filename = filedialog.asksaveasfilename(initialdir=self.default_directory,
                                                 title="Select a file to save to (this will overwrite existing spells!)",
@@ -341,6 +380,7 @@ class SpellGenerator:
         if filename is not None and len(filename) > 0:
             if not filename.lower().endswith(".lst"):
                 filename = filename + ".lst"
+            # Check to see if trying to overwrite a .lst file that wasn't generated by this tool, possibly wrecking it
             if os.path.isfile(filename):
                 with open(filename, "r") as f:
                     header = f.readline()
@@ -353,7 +393,8 @@ class SpellGenerator:
                                                     "functioning properly.  Continue?")
                     if not answer:
                         return
-            self.generate_spell_lst(filename=filename, spells=self.spell_list[self.system_mode.get()], mods=self.mod_list)
+            self.generate_spell_lst(filename=filename, spells=self.spell_list[self.system_mode.get()],
+                                    mods=self.mod_list)
             self.default_directory = os.path.dirname(filename)
             messagebox.showinfo("Success", "Saved spells to file: " + filename)
             contents = os.listdir(self.default_directory)
@@ -363,13 +404,13 @@ class SpellGenerator:
                     pcc_file = os.path.join(self.default_directory, entry)
             if pcc_file == "":
                 answer = messagebox.askyesno("No .pcc file found.", "Would you like to create a new .pcc file for " +
-                                    "PCGen to be able to import your .lst as part of a new source?")
+                                             "PCGen to be able to import your .lst as part of a new source?")
                 if answer:
                     pcc_file = filedialog.asksaveasfilename(initialdir=self.default_directory,
                                                             title="Select a filename for your new source (e.g., homebrew.pcc)",
                                                             confirmoverwrite=True,
                                                             filetypes=(
-                                                            ("PCGen PCC Files", "*.pcc"), ("All Files", "*.*")))
+                                                                ("PCGen PCC Files", "*.pcc"), ("All Files", "*.*")))
                     success = self.generate_pcc_file(pcc_file=pcc_file, spell_lst_file=filename)
                     if success:
                         messagebox.showinfo("Success", "Successfully generated new .pcc file. Source should be " +
@@ -378,25 +419,7 @@ class SpellGenerator:
                     messagebox.showinfo("No .pcc file for PCGen", "PCGen may not be able to load your .lst file " +
                                         "without a valid .pcc file.")
             else:
-                with open(pcc_file, "r") as f:
-                    lines = f.readlines()
-                spell_lst_found = False
-                for line in lines:
-                    if line.startswith("SPELL:"):
-                        if line.count(os.path.basename(filename)) > 0:
-                            spell_lst_found = True
-                if not spell_lst_found:
-                    answer = messagebox.askyesno(".lst file not loaded in .pcc", "The .pcc file in this folder does " +
-                                        "not appear to load your .lst file.  Add it to the .pcc file?")
-                    if answer:
-                        try:
-                            with open(pcc_file, "a") as f:
-                                f.write("\nSPELL:" + os.path.basename(filename))
-                        except Exception as e:
-                            messagebox.showerror("Error updating " + os.path.basename(pcc_file), str(e))
-                            print(e)
-                            return
-                        messagebox.showinfo("Success", ".pcc file successfully updated!")
+                self.update_pcc_file(pcc_file=pcc_file, lst_file=filename)
 
     def generate_pcc_file(self, pcc_file: str, spell_lst_file: str) -> bool:
         """
@@ -439,6 +462,34 @@ class SpellGenerator:
             print(e)
             return False
 
+    def update_pcc_file(self, pcc_file: str, lst_file: str) -> None:
+        """
+        Checks to see if the given .pcc file includes a reference to the given spell .lst file, and if not, asks
+        user if they want to update it.
+
+        :param pcc_file: Fully-qualified path to .pcc file to check
+        :param lst_file: Fully-qualified path to .lst file to check .pcc file for a reference to
+        """
+        with open(pcc_file, "r") as f:
+            lines = f.readlines()
+        spell_lst_found = False
+        for line in lines:
+            if line.startswith("SPELL:"):
+                if line.count(os.path.basename(lst_file)) > 0:
+                    spell_lst_found = True
+        if not spell_lst_found:
+            answer = messagebox.askyesno(".lst file not loaded in .pcc", "The .pcc file in this folder does " +
+                                         "not appear to load your .lst file.  Add it to the .pcc file?")
+            if answer:
+                try:
+                    with open(pcc_file, "a") as f:
+                        f.write("\nSPELL:" + os.path.basename(lst_file))
+                except Exception as e:
+                    messagebox.showerror("Error updating " + os.path.basename(pcc_file), str(e))
+                    print(e)
+                    return
+                messagebox.showinfo("Success", ".pcc file successfully updated!")
+
     def load_spells(self) -> None:
         """
         Load spells from an existing .lst file, e.g., to edit and add to an existing list of homebrew spells.
@@ -450,7 +501,8 @@ class SpellGenerator:
         if filename is not None and len(str(filename)) > 0:
             self.spell_list[self.system_mode.get()].clear()
             self.mod_list.clear()
-            (self.header, self.spell_list[self.system_mode.get()], self.mod_list) = self.load_spell_lst(filename=filename)
+            (self.header, self.spell_list[self.system_mode.get()], self.mod_list) = self.load_spell_lst(
+                filename=filename)
             self.spell_lb.delete(0, 'end')
             index = 0
             for spell in self.spell_list[self.system_mode.get()]:
@@ -459,7 +511,8 @@ class SpellGenerator:
             self.default_directory = os.path.dirname(filename)
             messagebox.showinfo("Success", "Loaded spells from file: " + filename)
 
-    def about_dialog(self) -> None:
+    @staticmethod
+    def about_dialog() -> None:
         messagebox.showinfo("PCGen Homebrew Spell .lst Generator " + VERSION, "Build date: " + BUILD_DATE + "\n" +
                             "Written by Sean Butler (Tamdrik#0553 on PCGen Discord)")
 
@@ -506,7 +559,7 @@ class SpellGenerator:
             mode_dialog.focus_set()
             mode_dialog.wait_window()
             self.default_system = system.get()
-            #mode_dialog.destroy()
+            # mode_dialog.destroy()
             return
 
         for line in lines:
@@ -584,6 +637,11 @@ class SpellGenerator:
                             if token.startswith("CLASSES:") and not token.endswith("CLASSES:"):
                                 class_tokens = token.split(":", maxsplit=1)
                                 class_string = class_tokens[1]
+                                if class_string.count("[") > 0 and class_string.count("]") > 0:
+                                    start = class_string.index("[")
+                                    end = class_string.index("]")
+                                    spell.fields['class_suffix'] += class_string[start:end + 1]
+                                    class_string = class_string[0:start]
                                 class_tokens = class_string.split("|")
                                 for level_group in class_tokens:
                                     class_string = level_group.split("=", maxsplit=1)[0]
@@ -600,6 +658,7 @@ class SpellGenerator:
                 tokens = list(filter(None, line.split("\t")))
                 spell_dict['name'] = tokens.pop(0)
                 spell_dict['classes'] = [[], [], [], [], [], [], [], [], [], []]
+                spell_dict['class_suffix'] = ""
                 spell_dict['verbal'] = False
                 spell_dict['somatic'] = False
                 spell_dict['material'] = False
@@ -618,6 +677,7 @@ class SpellGenerator:
                 spell_dict['target'] = ""
                 spell_dict['descriptors'] = []
                 spell_dict['subschool'] = ""
+                spell_dict['material_desc'] = ""
                 spell_dict['other_fields'] = []
                 for token in tokens:
                     token = token.strip()
@@ -632,6 +692,11 @@ class SpellGenerator:
                     elif token.startswith("CLASSES:") and not token.endswith("CLASSES:"):
                         class_tokens = token.split(":", maxsplit=1)
                         class_string = class_tokens[1]
+                        if class_string.count("[") > 0 and class_string.count("]") > 0:
+                            start = class_string.index("[")
+                            end = class_string.index("]")
+                            spell_dict['class_suffix'] = class_string[start:end+1]
+                            class_string = class_string[0:start]
                         class_tokens = class_string.split("|")
                         for level_group in class_tokens:
                             class_string = level_group.split("=", maxsplit=1)[0]
@@ -660,7 +725,13 @@ class SpellGenerator:
                     elif token.startswith("DESC:"):
                         spell_dict['desc'] = token.split(":", maxsplit=1)[1]
                     elif token.startswith("COMPS:"):
-                        comp_list = token.split(":", maxsplit=1)[1].split(",")
+                        comp_string = token.split(":", maxsplit=1)[1]
+                        if comp_string.count("(") > 0 and comp_string.count(")") > 0:
+                            start = comp_string.index("(")
+                            end = comp_string.index(")")
+                            spell_dict['material_desc'] = comp_string[start+1:end]
+                            comp_string = comp_string[0:start]
+                        comp_list = comp_string.split(",")
                         for comp in comp_list:
                             if comp.strip() == "V":
                                 spell_dict['verbal'] = True
@@ -681,19 +752,23 @@ class SpellGenerator:
                                     school=spell_dict['school'], casting_time=spell_dict['casting_time'],
                                     spell_range=spell_dict['range'], duration=spell_dict['duration'],
                                     desc=spell_dict['desc'],
-                                    arcane=spell_dict['arcane'], divine=spell_dict['divine'], psychic=spell_dict['psychic'],
+                                    arcane=spell_dict['arcane'], divine=spell_dict['divine'],
+                                    psychic=spell_dict['psychic'],
                                     save=spell_dict['save'], sr=spell_dict['sr'], target=spell_dict['target'],
                                     descriptors=spell_dict['descriptors'], subschool=spell_dict['subschool'],
                                     verbal=spell_dict['verbal'], somatic=spell_dict['somatic'],
                                     material=spell_dict['material'],
                                     focus=spell_dict['focus'], divine_focus=spell_dict['divine_focus'],
+                                    material_desc=spell_dict['material_desc'],
+                                    class_suffix=spell_dict['class_suffix'],
                                     other_fields=spell_dict['other_fields']))
         return (header, spells, mods)
 
     @staticmethod
     def generate_spell_lst(filename: str, spells: list, mods: list = (),
                            header: str = "SOURCELONG:Homebrew\tSOURCESHORT:Homebrew\tSOURCEWEB:None\t#\tSOURCEDATE:" +
-                                         str(datetime.datetime.now()).split(" ")[0], mode: str="Pathfinder 1e") -> None:
+                                         str(datetime.datetime.now()).split(" ")[0],
+                           mode: str = "Pathfinder 1e") -> None:
         """
         Writes a list of Spells to a .lst file in PCGen format.
 
@@ -703,6 +778,7 @@ class SpellGenerator:
                     file previously).
         :param header: String containing the initial header line of the .lst file.  Defaults to a generic header
                     specifying source as "Homebrew" with current date.
+        :param mode: String defining what game/system mode context to use when writing spells to a .lst
         """
         print("Generating spell list...")
         with open(filename, "w") as f:
@@ -770,14 +846,14 @@ class SpellEditor(Frame):
         if self.mode == "Pathfinder 1e":
             self.type_values = {'arcane': BooleanVar(False), 'divine': BooleanVar(False), 'psychic': BooleanVar(False)}
         elif self.mode == "D&D 3.5e":
-            self.type_values = {'arcane': BooleanVar(False), 'divine': BooleanVar(False), 'psionic': BooleanVar(False)}
+            self.type_values = {'arcane': BooleanVar(False), 'divine': BooleanVar(False)}
         elif self.mode == "D&D 5e":
             self.type_values = {'arcane': BooleanVar(False), 'divine': BooleanVar(False)}
 
-        for type in self.type_values.keys():
-            self.type_cb[type] = Checkbutton(self.type_frame, text=type.capitalize(), variable=self.type_values[type],
-                                                 onvalue=True, offvalue=False)
-            self.type_cb[type].pack(side=LEFT)
+        for spell_type in self.type_values.keys():
+            self.type_cb[spell_type] = Checkbutton(self.type_frame, text=spell_type.capitalize(),
+                                                   variable=self.type_values[spell_type], onvalue=True, offvalue=False)
+            self.type_cb[spell_type].pack(side=LEFT)
 
         self.component_cb = {}
         if self.mode == "D&D 5e":
@@ -793,12 +869,20 @@ class SpellEditor(Frame):
 
         for component in self.component_values.keys():
             self.component_cb[component] = Checkbutton(self.components_frame, text=component[0].upper(),
-                                                      variable=self.component_values[component],
-                                                      onvalue=True, offvalue=False)
+                                                       variable=self.component_values[component],
+                                                       onvalue=True, offvalue=False)
             if component == "divine_focus":
                 self.component_cb[component].configure(text="DF")
             self.component_cb[component].pack(side=LEFT)
 
+        if self.mode == "D&D 5e":
+            self.component_cb['material'].configure(command=self.update_material_desc_field)
+            self.spell_fields['material_desc'] = Entry(self.components_frame, width=35, state=DISABLED)
+            self.spell_fields['material_desc'].pack(side=LEFT)
+            ToolTip(self.spell_fields['material_desc'], "Additional material component description, particularly if " +
+                                                        "costly.\nExamples:\nruby dust worth 1,500gp\n" +
+                                                        "incense and powdered diamond worth 200gp, which the spell " +
+                                                        "consumes")
 
         self.subschools = {}
         if self.mode == "D&D 5e":
@@ -868,24 +952,32 @@ class SpellEditor(Frame):
         elif self.mode == "D&D 3.5e":
             self.caster_type['arcane'] = ("Bard", "Wizard")
             self.caster_type['divine'] = ("Blackguard", "Cleric", "Druid", "Paladin")
-            self.caster_type['psionic'] = ("Psion", "Wilder", "Psychic Warrior")
+            #self.caster_type['psionic'] = ("Psion", "Wilder", "Psychic Warrior")
         elif self.mode == "D&D 5e":
             self.caster_type['arcane'] = ("Artificer", "Bard", "Sorcerer", "Warlock", "Warlock Book of Shadows",
                                           "Wizard")
             self.caster_type['divine'] = ("Cleric", "Druid", "Paladin", "Ranger")
 
         self.classes = []
-        for type in self.caster_type.keys():
-            for caster in self.caster_type[type]:
+        for spell_type in self.caster_type.keys():
+            for caster in self.caster_type[spell_type]:
                 self.classes.append(caster)
 
         self.selected_class = StringVar(self.master)
         self.selected_class.set("Wizard")
         self.classes_dropdown = OptionMenu(classes_top_subframe, self.selected_class, *self.classes)
         self.classes_dropdown.pack(side=LEFT)
-        ToolTip(self.classes_dropdown,
-                msg="Some classes share spell lists, e.g., Sorcerers and Arcanists use the Wizard list.\n" +
-                    "Unchained Summoner is not supported by this tool.")
+        if self.mode == "D&D 5e":
+            ToolTip(self.classes_dropdown,
+                    msg="Some classes cast spells from other spell lists, e.g., a Monochromancer casts from the " +
+                        "Warlock and Cleric lists, so there is no separate Monochromancer option.")
+        elif self.mode == "Pathfinder 1e":
+            ToolTip(self.classes_dropdown,
+                    msg="Some classes share spell lists, e.g., Sorcerers and Arcanists use the Wizard list.\n" +
+                        "Unchained Summoner is not supported by this tool.")
+        elif self.mode == "D&D 3.5e":
+            ToolTip(self.classes_dropdown,
+                    msg="Some classes share spell lists, e.g., Sorcerers use the Wizard list.\n")
 
         self.spell_level_spinbox = Spinbox(classes_top_subframe, from_=0, to=9, width=3)
         self.spell_level_spinbox.pack(side=LEFT)
@@ -1013,7 +1105,8 @@ class SpellEditor(Frame):
         self.spell_fields['other'].pack(side=LEFT, fill=X, expand=True)
         ToolTip(self.spell_fields['other'],
                 msg="Other tab-separated tokens not explicitly supported by this tool. Edit with caution.\n" +
-                    "Examples:\nSOURCEPAGE:p.50\nFACTSET:Deity|Asmodeus\nTEMPBONUS [various]")
+                    "Examples:\nSOURCEPAGE:p.50\nFACTSET:Deity|Asmodeus\nTEMPBONUS [various]\n" +
+                    "FACT:CompMaterial|(500gp of diamond dust)")
 
         row = row + 1
         self.spell_buttons['add_spell'] = Button(spell_edit_subframes[row], text="Add Spell", command=self.add_spell,
@@ -1058,9 +1151,9 @@ class SpellEditor(Frame):
             class_name = class_string.split(":")[0]
 
             # Check the box associated with the spellcasting type of the newly added class, if it isn't already
-            for type in self.type_values.keys():
-                if class_name in self.caster_type[type]:
-                    self.type_cb[type].select()
+            for spell_type in self.type_values.keys():
+                if class_name in self.caster_type[spell_type]:
+                    self.type_cb[spell_type].select()
 
             # If Wizard is added, also add Sorcerer, since that appears to be PCGen .lst convention for PF1e/3.5e
             if class_string.count("Wizard") > 0 and self.mode in ("Pathfinder 1e", "D&D 3.5e"):
@@ -1185,6 +1278,13 @@ class SpellEditor(Frame):
         Called as part of the 'edit spell' function.  This copies the characteristics of the selected spell into the
         corresponding GUI elements in the spell editing frame.
         """
+        for component in self.component_values.keys():
+            if spell.comps[component]:
+                self.component_cb[component].select()
+            else:
+                self.component_cb[component].deselect()
+        self.update_material_desc_field()
+
         for field in spell.fields.keys():
             if field == "school":
                 self.selected_school.set(spell.fields[field])
@@ -1201,6 +1301,9 @@ class SpellEditor(Frame):
                     self.selected_sr.set("None")
                 else:
                     self.selected_sr.set("No")
+            elif field == "material_desc" and self.mode == "D&D 5e":
+                self.spell_fields['material_desc'].delete(0, END)
+                self.spell_fields['material_desc'].insert(0, spell.fields[field])
             else:
                 if field != "desc" and field in self.spell_fields.keys():
                     self.spell_fields[field].delete(0, END)
@@ -1221,18 +1324,13 @@ class SpellEditor(Frame):
                 self.type_cb[spell_type].select()
             else:
                 self.type_cb[spell_type].deselect()
-        for component in self.component_values.keys():
-            if spell.comps[component]:
-                self.component_cb[component].select()
-            else:
-                self.component_cb[component].deselect()
 
         self.classes_lb.delete(0, END)
         for level in range(0, 10):
             for class_name in spell.classes[level]:
                 self.classes_lb.insert(self.classes_lb.size(), class_name + ":" + str(level))
 
-    def update_subschool_choices(self, school:str=None) -> None:
+    def update_subschool_choices(self, school: str = None) -> None:
         """ Refresh the list of available subschools to match the specified (or currently selected if none) school. """
         if school is None:
             school = self.selected_school.get()
@@ -1240,6 +1338,13 @@ class SpellEditor(Frame):
         menu.delete(0, END)
         for subschool in self.subschools[school]:
             menu.add_command(label=subschool, command=lambda value=subschool: self.selected_subschool.set(value))
+
+    def update_material_desc_field(self):
+        if self.mode == "D&D 5e":
+            if self.component_values['material'].get():
+                self.spell_fields['material_desc'].configure(state=NORMAL)
+            else:
+                self.spell_fields['material_desc'].configure(state=DISABLED)
 
 
 def main():
