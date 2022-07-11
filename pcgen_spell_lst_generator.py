@@ -16,8 +16,8 @@ v1.1.1: Fixes bug introduced by adding 5e support that broke loading most .MODs 
 """
 
 PCGEN_TAB_SIZE = 6  # Used to half-assedly format the first few fields' spacing when writing to a .lst file
-VERSION = "1.1"
-BUILD_DATE = "10 July 2022"
+VERSION = "1.1.1"
+BUILD_DATE = "11 July 2022"
 
 class Spell:
     def __init__(self, name: str, classes_by_level: list, school: str, casting_time: str, spell_range: str,
