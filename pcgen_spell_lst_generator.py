@@ -5,6 +5,15 @@ from tkinter import messagebox
 from tktooltip import ToolTip
 import os
 
+"""
+v1.0: Initial release with robust Pathfinder 1e support and nominal D&D 3.5e support
+v1.0.1: Minor update to give users brief instructions on where to save .lst files if program can't
+        automatically find the PCGen folder
+v1.1: Major update to add D&D 5e support and more explicit D&D 3.5 support.  Maintains separate spell lists for
+      each game mode.
+v1.1.1: Fixes bug introduced by adding 5e support that broke loading most .MODs and made other minor changes to
+        tooltips and message boxes to tailor to selected game system better and removed some debugging lines.
+"""
 
 PCGEN_TAB_SIZE = 6  # Used to half-assedly format the first few fields' spacing when writing to a .lst file
 VERSION = "1.1"
@@ -259,15 +268,10 @@ class SpellGenerator:
         self.win.mainloop()
 
     def set_system(self) -> None:
-        print("System mode is: " + self.system_mode.get())
-        if self.system_mode.get() == "Pathfinder 1e":
-            print("Pathfinder")
-        elif self.system_mode.get() == "D&D 3.5e":
-            print("D&D 3.5e")
-        elif self.system_mode.get() == "D&D 5e":
-            print("D&D 5e")
-        else:
-            print("Unknown system")
+        """
+        Update everything according to selected system mode.  Swaps spell lists & re-initializes spell editing frame to
+        reflect elements that are relevant to current system.
+        """
         self.spell_list_label.configure(text=self.system_mode.get() + " Spells")
         self.spell_lb.delete(0, END)
         for spell in self.spell_list[self.system_mode.get()]:
@@ -589,7 +593,7 @@ class SpellGenerator:
                                         spell.classes[level].append(caster)
                                 tokens.remove(token)
                 if len(tokens) > 1:
-                    line = tokens.join("\t")
+                    line = "\t".join(tokens)
                     mods.append(line)
             elif len(line) > 0 and line[0] != "#":
                 spell_dict = {}
@@ -903,10 +907,10 @@ class SpellEditor(Frame):
             self.descriptors_lb.pack(side=LEFT)
             self.selected_descriptor = StringVar()
             if self.mode == "Pathfinder 1e":
-                self.descriptors = ["Acid", "Air", "Chaotic", "Cold", "Curse", "Darkness", "Death", "Disease", "Draconic",
-                                    "Earth", "Electricity", "Emotion", "Evil", "Fear", "Fire", "Force", "Good",
-                                    "Language-Dependent", "Lawful", "Light", "Meditative", "Mind-Affecting", "Pain",
-                                    "Poison", "Shadow", "Sonic", "Water"]
+                self.descriptors = ["Acid", "Air", "Chaotic", "Cold", "Curse", "Darkness", "Death", "Disease",
+                                    "Draconic", "Earth", "Electricity", "Emotion", "Evil", "Fear", "Fire", "Force",
+                                    "Good", "Language-Dependent", "Lawful", "Light", "Meditative", "Mind-Affecting",
+                                    "Pain", "Poison", "Shadow", "Sonic", "Water"]
             else:
                 self.descriptors = ["Acid", "Air", "Chaos", "Chaotic", "Cold", "Compulsion", "Creation", "Darkness",
                                     "Death", "Earth", "Ectomancy", "Electricity", "Evil", "Fear", "Fire",
@@ -1037,9 +1041,9 @@ class SpellEditor(Frame):
         Modifies the current spell being edited.
 
         Adds a class who has the spell on their list, as well as the level at which they cast the spell.
-        Since Wizards and Sorcerers share the same list, only Wizards can be directly added, but PCGen .lst files
-        appear to include both classes by convention, so whenever a spell is added to the Wizard list, it is also
-        added to Sorcerer as well at the same level.
+        Since Wizards and Sorcerers share the same list in PF1e/3.5e, only Wizards can be directly added in those modes,
+        but PCGen .lst files appear to include both classes by convention, so whenever a spell is added to the Wizard
+        list, it is also added to Sorcerer as well at the same level.
 
         Updates the spell type (arcane/divine/psychic) checkboxes automatically.
         """
@@ -1058,8 +1062,8 @@ class SpellEditor(Frame):
                 if class_name in self.caster_type[type]:
                     self.type_cb[type].select()
 
-            # If Wizard is added, also add Sorcerer, since that appears to be PCGen .lst convention for PF1e
-            if class_string.count("Wizard") > 0 and self.mode == "Pathfinder 1e":
+            # If Wizard is added, also add Sorcerer, since that appears to be PCGen .lst convention for PF1e/3.5e
+            if class_string.count("Wizard") > 0 and self.mode in ("Pathfinder 1e", "D&D 3.5e"):
                 self.classes_lb.insert(0, "Sorcerer" + ":" + self.spell_level_spinbox.get())
         else:
             messagebox.showerror("Class already in list",
@@ -1070,10 +1074,10 @@ class SpellEditor(Frame):
         """
         Remove the spell from the list of the selected casting class.
 
-        Updates the spell type (arcane/divine/psychic) checkboxes automatically.
+        Updates the spell type (e.g., arcane/divine/psychic) checkboxes automatically.
 
-        If either Wizard or Sorcerer is removed, the other is also automatically removed.  See add_class() for more
-        info.
+        In PF1e mode, if either Wizard or Sorcerer is removed, the other is also automatically removed.  See
+        add_class() for more info.
         """
         try:
             index = self.classes_lb.curselection()[0]
@@ -1083,8 +1087,8 @@ class SpellEditor(Frame):
         class_name = self.classes_lb.get(index).split(":")[0]
         self.classes_lb.delete(index)
 
-        # Make sure Wizards and Sorcerers are both removed from list together
-        if self.mode == "Pathfinder 1e":
+        # Make sure Wizards and Sorcerers are both removed from list together for PF1e/3.5e
+        if self.mode in ("Pathfinder 1e", "D&D 3.5e"):
             if class_name == "Wizard":
                 for i in range(0, self.classes_lb.size()):
                     if self.classes_lb.get(i).count("Sorcerer") > 0:
@@ -1125,16 +1129,24 @@ class SpellEditor(Frame):
             messagebox.showerror("No classes/spell level defined", "No classes defined with spell on their list.")
             return
         if len(self.spell_fields['casting_time'].get()) == 0:
-            messagebox.showerror("Spell has no casting time", "Spell casting time is required.  This is usually " +
-                                 "\'1 standard action\'")
+            if self.mode == "D&D 5e":
+                messagebox.showerror("Spell has no casting time", "Spell casting time is required.  This is usually " +
+                                     "\'1 action\'")
+            else:
+                messagebox.showerror("Spell has no casting time", "Spell casting time is required.  This is usually " +
+                                     "\'1 standard action\'")
             return
         if len(self.spell_fields['duration'].get()) == 0:
             messagebox.showerror("Spell has no duration", "Spell duration is required. Spells that do not last " +
                                  "beyond their initial effect generally have \'instantaneous\' duration.")
             return
         if len(self.spell_fields['range'].get()) == 0:
-            messagebox.showerror("Spell has no range", "Spell range is required. This value can be \'personal\' or " +
-                                 "\'touch\'.")
+            if self.mode == "D&D 5e":
+                messagebox.showerror("Spell has no range", "Spell range is required. This value can be \'Self\' or " +
+                                     "\'Touch\', for example.")
+            else:
+                messagebox.showerror("Spell has no range", "Spell range is required. This value can be \'personal\' " +
+                                     "or \'touch\', for example.")
             return
 
         for class_entry in classes:
@@ -1194,7 +1206,7 @@ class SpellEditor(Frame):
                     self.spell_fields[field].delete(0, END)
                     self.spell_fields[field].insert(0, spell.fields[field])
                 elif field == "desc":
-                    self.spell_fields[field].delete("1.0", "end")
+                    self.spell_fields[field].delete("1.0", END)
                     self.spell_fields[field].insert(END, spell.fields[field])
 
         self.spell_fields['other'].delete("1.0", END)
