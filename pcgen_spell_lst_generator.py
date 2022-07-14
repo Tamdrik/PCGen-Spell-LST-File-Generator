@@ -6,6 +6,11 @@ from tktooltip import ToolTip
 import os
 
 """
+KNOWN ISSUES:
+- Does not handle spells with multiple subschools (e.g., Gate, Mislead).  These are relatively rare.
+- Does not handle 3.5e psionic spells.  These significantly complicate things by introducing their own schools of 
+    magic, weird class prerequisites, etc.
+
 v1.0: Initial release with robust Pathfinder 1e support and nominal D&D 3.5e support
 v1.0.1: Minor update to give users brief instructions on where to save .lst files if program can't
         automatically find the PCGen folder
@@ -14,12 +19,16 @@ v1.1: Major update to add D&D 5e support and more explicit D&D 3.5 support.  Mai
 v1.1.1: Fixes bug introduced by adding 5e support that broke loading most .MODs and made other minor changes to
         tooltips and message boxes to tailor to selected game system better and removed some debugging lines.
 v1.1.2: Adds support for material component descriptions in D&D 5e.  Further cleanup/tailoring of tooltips, etc.
-        Removes vestigial psionic support for 3.5e because it's a mess. 
+        Removes vestigial psionic support for 3.5e because it's a mess.
+v1.1.3: Checks for empty "required" fields before outputting associated token, since there are some oddball spell
+        entries (e.g., 3.5 Bestow Curse options) that are missing things like casting classes, casting time, etc.
+        Output .lst file formatting less half-assed.  Fixes bug in initialization of BooleanVars containing spell
+        types and components. 
 """
 
-PCGEN_TAB_SIZE = 6  # Used to half-assedly format the first few fields' spacing when writing to a .lst file
-VERSION = "1.1.2"
-BUILD_DATE = "11 July 2022"
+PCGEN_TAB_SIZE = 6  # Used to format field spacing when writing to a .lst file
+VERSION = "1.1.3"
+BUILD_DATE = "14 July 2022"
 
 
 class Spell:
@@ -64,30 +73,43 @@ class Spell:
         self.fields = {}
         self.type = {}
         self.comps = {}
+        self.tags = {}
         self.fields['name'] = name.strip()
         self.classes = classes_by_level
         self.fields['school'] = school.strip()
+        self.tags['school'] = "SCHOOL:"
         self.fields['subschool'] = subschool.strip()
+        self.tags['subschool'] = "SUBSCHOOL:"
         self.fields['casting_time'] = casting_time.strip()
+        self.tags['casting_time'] = "CASTTIME:"
         self.fields['range'] = spell_range.strip()
+        self.tags['range'] = "RANGE:"
         self.fields['save'] = save.strip()
+        self.tags['save'] = "SAVEINFO:"
         self.fields['target'] = target.strip()
+        self.tags['target'] = "TARGETAREA:"
         self.fields['duration'] = duration.strip()
+        self.tags['duration'] = "DURATION:"
         self.fields['sr'] = sr.strip()
+        self.tags['sr'] = "SPELLRES:"
         self.fields['desc'] = desc.strip()
+        self.tags['desc'] = "DESC:"
         self.fields['material_desc'] = material_desc.strip()
         self.fields['class_suffix'] = class_suffix.strip()
         self.type['arcane'] = arcane
         self.type['divine'] = divine
         self.type['psychic'] = psychic
+        self.tags['type'] = "TYPE:"
         self.descriptors = []
         for descriptor in descriptors:
             self.descriptors.append(descriptor.strip())
+        self.tags['descriptors'] = "DESCRIPTOR:"
         self.comps['verbal'] = verbal
         self.comps['somatic'] = somatic
         self.comps['material'] = material
         self.comps['focus'] = focus
         self.comps['divine_focus'] = divine_focus
+        self.tags['comps'] = "COMPS:"
         self.other_fields = []
         for field in other_fields:
             self.other_fields.append(field.strip())
@@ -95,13 +117,20 @@ class Spell:
 
     def __str__(self) -> str:
         """
-        :return: String representation of a spell: the corresponding line in a PCGen .lst file.
+        :return: String representation of a spell: the corresponding line in a PCGen .lst file.  Formatted so that
+                 most fields are aligned into columns if editor tab with is set to PCGEN_TAB_SIZE (global variable)
         """
+        excess_tabs = 0
+        field_width = {}
+
         spell_string = self.fields['name']
         for i in range(0, 6 - int(len(self.fields['name']) / PCGEN_TAB_SIZE)):
             spell_string += "\t"
+        if len(self.fields['name']) > 6 * PCGEN_TAB_SIZE:
+            excess_tabs = int((len(self.fields['name']) - 6 * PCGEN_TAB_SIZE) / PCGEN_TAB_SIZE)
 
         # Generate list of spell types (Arcane, Divine, Psychic)
+        field_width['type'] = 4
         if self.type['arcane'] or self.type['divine'] or self.type['psychic']:
             spell_string = spell_string + "\tTYPE:"
             first_type = True
@@ -129,95 +158,222 @@ class Spell:
             if self.mode == "D&D 5e":
                 spell_string = spell_string + ".Spell"
                 type_string_length += 6
-            spell_string = spell_string + "\t" * (4 - int(type_string_length / PCGEN_TAB_SIZE))
-        spell_string = spell_string + "\tCLASSES:"
+            tabs = (field_width['type'] - int(type_string_length / PCGEN_TAB_SIZE))
+        else:
+            tabs = field_width['type'] + 1
+        while tabs > 0 and excess_tabs > 0:
+            tabs -= 1
+            excess_tabs -= 1
+        spell_string = spell_string + "\t" * tabs
 
-        # Construct list of classes that can cast spell at what levels
-        first_level = True
-        for level in range(0, len(self.classes)):
-            if len(self.classes[level]) > 0:
-                if first_level:
-                    first_level = False
-                else:
-                    spell_string += "|"
-                first_class = True
-                for class_name in self.classes[level]:
-                    if first_class:
-                        first_class = False
-                    else:
-                        spell_string += ","
-                    spell_string += class_name
-                spell_string += "=" + str(level)
-        if len(self.fields['class_suffix']) > 0:
-            spell_string += self.fields['class_suffix']
-        spell_string = spell_string + "\tSCHOOL:" + self.fields['school']
+        field_width['school'] = 4
+        if len(self.fields['school']) > 0:
+            spell_string = spell_string + "\tSCHOOL:" + self.fields['school']
+            tabs = (field_width['school'] - int((len(self.fields['school']) + 7) / PCGEN_TAB_SIZE))
+        else:
+            tabs = field_width['school'] + 1
+        while tabs > 0 and excess_tabs > 0:
+            tabs -= 1
+            excess_tabs -= 1
+        spell_string = spell_string + "\t" * tabs
+
+        if self.mode == "D&D 5e":
+            field_width['subschool'] = 3
+        else:
+            field_width['subschool'] = 4
+        tabs = 0
         if len(self.fields['subschool']) > 0:
             spell_string = spell_string + "\tSUBSCHOOL:" + self.fields['subschool']
+            tabs = (field_width['subschool'] - int((len(self.fields['subschool']) + 10) / PCGEN_TAB_SIZE))
+        else:
+            tabs = field_width['subschool'] + 1
+        while tabs > 0 and excess_tabs > 0:
+            tabs -= 1
+            excess_tabs -= 1
+        spell_string = spell_string + "\t" * tabs
+
+        field_width['casting_time'] = 5
+        field_width['range'] = 4
+        if self.mode == "D&D 5e":
+            field_width['duration'] = 7
+            field_width['save'] = 4
+            field_width['sr'] = 0
+            field_width['comps'] = 11
+            field_width['descriptors'] = 0
+            field_width['target'] = 0
+        else:
+            field_width['duration'] = 10
+            field_width['save'] = 7
+            field_width['sr'] = 4
+            field_width['comps'] = 3
+            field_width['descriptors'] = 7
+            field_width['target'] = 10
+        field_width['classes'] = 10
+
+        fields = ["casting_time", "range", "duration", "save"]
+        if self.mode != "D&D 5e":
+            fields.append("sr")
+            fields.append("target")
+        for field in fields:
+            if len(self.fields[field]) > 0:
+                spell_string = spell_string + "\t" + self.tags[field] + self.fields[field]
+                (tabs, et) = self.calculate_tabs(field_name=field, field_width=field_width[field])
+                excess_tabs += et
+            else:
+                tabs = field_width[field] + 1
+            while tabs > 0 and excess_tabs > 0:
+                tabs -= 1
+                excess_tabs -= 1
+            spell_string = spell_string + "\t" * tabs
+
+        # Construct list of spell components required
+        if self.comps['verbal'] or self.comps['somatic'] or self.comps['material'] or self.comps['focus'] or\
+            self.comps['divine_focus']:
+            component_string = "\tCOMPS:"
+            first_component = True
+            if self.comps['verbal']:
+                first_component = False
+                component_string = component_string + "V"
+            if self.comps['somatic']:
+                if first_component:
+                    first_component = False
+                else:
+                    component_string = component_string + ","
+                component_string = component_string + "S"
+            if self.comps['material']:
+                if first_component:
+                    first_component = False
+                else:
+                    component_string = component_string + ","
+                component_string = component_string + "M"
+                if len(self.fields['material_desc']) > 0 and self.mode == "D&D 5e":
+                   component_string = component_string + " (" + self.fields['material_desc'] + ")"
+            if self.mode != "D&D 5e":
+                if self.comps['focus']:
+                    if first_component:
+                        first_component = False
+                    else:
+                        component_string = component_string + ","
+                    component_string = component_string + "F"
+                    if self.comps['divine_focus']:
+                        component_string = component_string + "/DF"
+                elif self.comps['divine_focus']:
+                    if first_component:
+                        first_component = False
+                    else:
+                        component_string = component_string + ","
+                    component_string = component_string + "DF"
+            spell_string = spell_string + component_string
+            (tabs, et) = self.calculate_tabs_raw(token=component_string, field_width=field_width['comps'])
+            excess_tabs += et
+        else:
+            tabs = field_width['comps'] + 1
+        while tabs > 0 and excess_tabs > 0:
+            tabs -= 1
+            excess_tabs -= 1
+        spell_string = spell_string + "\t" * tabs
+
+        classes_found = False
+        for class_level in self.classes:
+            if len(class_level) > 0:
+                classes_found = True
+                break
+        if classes_found:
+            class_string = "\tCLASSES:"
+
+            # Construct list of classes that can cast spell at what levels
+            first_level = True
+            for level in range(0, len(self.classes)):
+                if len(self.classes[level]) > 0:
+                    if first_level:
+                        first_level = False
+                    else:
+                        class_string += "|"
+                    first_class = True
+                    for class_name in self.classes[level]:
+                        if first_class:
+                            first_class = False
+                        else:
+                            class_string += ","
+                        class_string += class_name
+                    class_string += "=" + str(level)
+            if len(self.fields['class_suffix']) > 0:
+                class_string += self.fields['class_suffix']
+            spell_string = spell_string + class_string
+            (tabs, et) = self.calculate_tabs_raw(token=class_string, field_width=field_width['classes'])
+            excess_tabs += et
+        else:
+            tabs = (field_width['classes'] + 1)
+        while tabs > 0 and excess_tabs > 0:
+            tabs -= 1
+            excess_tabs -= 1
+        spell_string = spell_string + "\t" * tabs
+
+        tabs = 0
         if len(self.descriptors) > 0:
-            spell_string = spell_string + "\tDESCRIPTOR:"
+            descriptor_string = "\tDESCRIPTOR:"
             first_descriptor = True
             for descriptor in self.descriptors:
                 if first_descriptor:
                     first_descriptor = False
                 else:
-                    spell_string = spell_string + "|"
-                spell_string = spell_string + descriptor
+                    descriptor_string = descriptor_string + "|"
+                descriptor_string = descriptor_string + descriptor
+            spell_string += descriptor_string
+            (tabs, et) = self.calculate_tabs_raw(token=descriptor_string, field_width=field_width['descriptors'])
+            excess_tabs += et
+        elif self.mode != "D&D 5e":
+            tabs = field_width['descriptors'] + 1
+        while tabs > 0 and excess_tabs > 0:
+            tabs -= 1
+            excess_tabs -= 1
+        spell_string = spell_string + "\t" * tabs
 
-        # Construct list of spell components required
-        spell_string = spell_string + "\tCOMPS:"
-        first_component = True
-        if self.comps['verbal']:
-            first_component = False
-            spell_string = spell_string + "V"
-        if self.comps['somatic']:
-            if first_component:
-                first_component = False
-            else:
-                spell_string = spell_string + ","
-            spell_string = spell_string + "S"
-        if self.comps['material']:
-            if first_component:
-                first_component = False
-            else:
-                spell_string = spell_string + ","
-            spell_string = spell_string + "M"
-            if len(self.fields['material_desc']) > 0 and self.mode == "D&D 5e":
-               spell_string = spell_string + " (" + self.fields['material_desc'] + ")"
-        if self.mode != "D&D 5e":
-            if self.comps['focus']:
-                if first_component:
-                    first_component = False
-                else:
-                    spell_string = spell_string + ","
-                spell_string = spell_string + "F"
-                if self.comps['divine_focus']:
-                    spell_string = spell_string + "/DF"
-            elif self.comps['divine_focus']:
-                if first_component:
-                    first_component = False
-                else:
-                    spell_string = spell_string + ","
-                spell_string = spell_string + "DF"
+        if len(self.fields['desc']) > 0:
+            spell_string = spell_string + "\t\tDESC:" + self.fields['desc']
 
-        spell_string = spell_string + "\tCASTTIME:" + self.fields['casting_time'] + "\tRANGE:" + self.fields[
-            'range'] + "\tDURATION:" + self.fields['duration']
-        if len(self.fields['target']) > 0 and self.mode != "D&D 5e":
-            spell_string = spell_string + "\tTARGETAREA:" + self.fields['target']
-        if len(self.fields['save']) > 0:
-            spell_string = spell_string + "\tSAVEINFO:" + self.fields['save']
-        if len(self.fields['sr']) > 0 and self.mode != "D&D 5e":
-            spell_string = spell_string + "\tSPELLRES:" + self.fields['sr']
-        spell_string = spell_string + "\tDESC:" + self.fields['desc']
         if len(self.other_fields) > 0:
             for field in self.other_fields:
                 if len(field.strip()) > 0:
-                    spell_string = spell_string + "\t" + field.strip()
+                    spell_string = spell_string + "\t\t" + field.strip()
 
         return spell_string
 
     def __eq__(self, other):
-        """ Two Spells are considered the same if they share a name. """
-        return self.fields['name'] == other.fields['name']
+        """ Two Spells are considered the same if they share a common name, case-insensitive. """
+        return self.fields['name'].upper() == other.fields['name'].upper()
+
+    def calculate_tabs(self, field_name: str, field_width: int) -> tuple:
+        """
+        Formatting helper function to determine how many tabs need to be added to token to align columns of fields.
+        Calls "calculate_tabs_raw" to do actual calculations after building the full token string to pass it.  Only
+        works with fields that are stored as a raw string, not lists such as classes and descriptors.
+
+        :param field_name: Name of field from Spell.fields/Spell.tags dict keys (e.g., "range")
+        :param field_width: How many tabs this token's column should span
+        :return: Tuple containing number of padding tabs needed, followed by how many extra tabs wide the column is, if
+                 it is larger than the designated field width.  This second value is used to reduce the tab padding of
+                 subsequent tokens in order to try to "catch up" when this token is over-sized.
+        """
+        token = self.tags[field_name] + self.fields[field_name]
+        return self.calculate_tabs_raw(token=token, field_width=field_width)
+
+    def calculate_tabs_raw(self, token: str, field_width: int) -> tuple:
+        """
+        Formatting helper function to determine how many tabs need to be added to token to align columns of fields.
+
+        :param token: Full text of token string, including tag name (e.g., "TYPE:Arcane.Divine")
+        :param field_width: How many tabs this token's column should span
+        :return: Tuple containing number of padding tabs needed, followed by how many extra tabs wide the column is, if
+                 it is larger than the designated field width.  This second value is used to reduce the tab padding of
+                 subsequent tokens in order to try to "catch up" when this token is over-sized.
+        """
+        token = token.strip()
+        tabs = (field_width - int(len(token) / PCGEN_TAB_SIZE))
+        excess_tabs = 0
+        if len(token) > field_width * PCGEN_TAB_SIZE:
+            excess_tabs = int(len(token) / PCGEN_TAB_SIZE) - field_width
+        return (tabs, excess_tabs)
 
 
 class SpellGenerator:
@@ -241,12 +397,11 @@ class SpellGenerator:
         self.win.title("PCGen Homebrew Spell Generator")
         self.win.protocol("WM_DELETE_WINDOW", self.on_exit)
         self.win.focus_set()
-
+        self.system_mode = StringVar(self.win)
+        self.system_mode.set(self.default_system)
         self.spell_list = {}
         for mode in modes:
             self.spell_list[mode] = []
-        self.system_mode = StringVar()
-        self.system_mode.set(self.default_system)
         self.spell_list[self.system_mode.get()] = spells
         self.mod_list = mods
 
@@ -317,6 +472,7 @@ class SpellGenerator:
         self.spell_editor.destroy()
         self.spell_editor.__init__(master=self.win, generator=self)
         self.spell_editor.pack(side=RIGHT, fill=BOTH, expand=True)
+        self.default_system = self.system_mode.get()
 
     def get_system(self) -> str:
         return self.system_mode.get()
@@ -394,7 +550,7 @@ class SpellGenerator:
                     if not answer:
                         return
             self.generate_spell_lst(filename=filename, spells=self.spell_list[self.system_mode.get()],
-                                    mods=self.mod_list)
+                                    mods=self.mod_list, mode=self.system_mode.get())
             self.default_directory = os.path.dirname(filename)
             messagebox.showinfo("Success", "Saved spells to file: " + filename)
             contents = os.listdir(self.default_directory)
@@ -558,6 +714,7 @@ class SpellGenerator:
             select_button.pack(side=TOP, pady=10)
             mode_dialog.focus_set()
             mode_dialog.wait_window()
+            self.system_mode = system
             self.default_system = system.get()
             # mode_dialog.destroy()
             return
@@ -780,7 +937,6 @@ class SpellGenerator:
                     specifying source as "Homebrew" with current date.
         :param mode: String defining what game/system mode context to use when writing spells to a .lst
         """
-        print("Generating spell list...")
         with open(filename, "w") as f:
             f.write(header + "\n")
             f.write("\n")
@@ -844,11 +1000,12 @@ class SpellEditor(Frame):
         self.type_frame.pack(side=LEFT, padx=10)
         self.type_values = {}
         if self.mode == "Pathfinder 1e":
-            self.type_values = {'arcane': BooleanVar(False), 'divine': BooleanVar(False), 'psychic': BooleanVar(False)}
+            self.type_values = {'arcane': BooleanVar(self, False), 'divine': BooleanVar(self, False),
+                                'psychic': BooleanVar(self, False)}
         elif self.mode == "D&D 3.5e":
-            self.type_values = {'arcane': BooleanVar(False), 'divine': BooleanVar(False)}
+            self.type_values = {'arcane': BooleanVar(self, False), 'divine': BooleanVar(self, False)}
         elif self.mode == "D&D 5e":
-            self.type_values = {'arcane': BooleanVar(False), 'divine': BooleanVar(False)}
+            self.type_values = {'arcane': BooleanVar(self, False), 'divine': BooleanVar(self, False)}
 
         for spell_type in self.type_values.keys():
             self.type_cb[spell_type] = Checkbutton(self.type_frame, text=spell_type.capitalize(),
@@ -857,12 +1014,12 @@ class SpellEditor(Frame):
 
         self.component_cb = {}
         if self.mode == "D&D 5e":
-            self.component_values = {'verbal': BooleanVar(False), 'somatic': BooleanVar(False),
-                                     'material': BooleanVar(False)}
+            self.component_values = {'verbal': BooleanVar(self, False), 'somatic': BooleanVar(self, False),
+                                     'material': BooleanVar(self, False)}
         else:
-            self.component_values = {'verbal': BooleanVar(False), 'somatic': BooleanVar(False),
-                                     'material': BooleanVar(False),
-                                     'focus': BooleanVar(False), 'divine_focus': BooleanVar(False)}
+            self.component_values = {'verbal': BooleanVar(self, False), 'somatic': BooleanVar(self, False),
+                                     'material': BooleanVar(self, False), 'focus': BooleanVar(self, False),
+                                     'divine_focus': BooleanVar(self, False)}
 
         self.components_frame = LabelFrame(spell_edit_subframes[row], text="Components")
         self.components_frame.pack(side=LEFT, padx=10)
